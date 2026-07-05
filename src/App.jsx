@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import * as THREE from "three";
 import {
   ResponsiveContainer,
   BarChart,
@@ -233,8 +234,30 @@ function Field({ label, children, hint }) {
 }
 
 function StatTile({ label, color, children, delay = 0 }) {
+  const ref = useRef(null);
+
+  function handleMouseMove(e) {
+    const el = ref.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width - 0.5;
+    const y = (e.clientY - rect.top) / rect.height - 0.5;
+    el.style.transform = `perspective(600px) rotateX(${(-y * 10).toFixed(2)}deg) rotateY(${(x * 10).toFixed(2)}deg) translateY(-3px) scale(1.02)`;
+  }
+
+  function handleMouseLeave() {
+    const el = ref.current;
+    if (el) el.style.transform = "";
+  }
+
   return (
-    <div className="bpg-stat-tile bpg-enter" style={{ animationDelay: `${delay}ms` }}>
+    <div
+      ref={ref}
+      className="bpg-stat-tile bpg-enter"
+      style={{ animationDelay: `${delay}ms` }}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+    >
       <span className="bpg-stat-dot" style={{ background: color }} />
       <span className="bpg-stat-label">{label}</span>
       <span className="bpg-stat-value">{children}</span>
@@ -440,6 +463,101 @@ function TrendsList({ trends }) {
   );
 }
 
+// L'elemento "wow": un piccolo grafico a barre reale in 3D, nei colori del
+// prodotto, che si costruisce da zero al primo caricamento e poi ruota
+// lentamente — la promessa del prodotto (trasformare un'idea in dati) resa
+// visibile prima ancora di leggere una parola.
+function BarsHero() {
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const width = container.clientWidth || 280;
+    const height = container.clientHeight || 190;
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(35, width / height, 0.1, 100);
+    camera.position.set(3.4, 2.5, 4.8);
+    camera.lookAt(0, 0.3, 0);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(width, height);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    container.appendChild(renderer.domElement);
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+    const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+    dir.position.set(3, 5, 4);
+    scene.add(dir);
+
+    const colors = [0x30b463, 0x0a84ff, 0xff9f0a, 0xbf5af2, 0xff375f];
+    const targetHeights = [1.1, 1.9, 1.35, 2.2, 1.6];
+    const group = new THREE.Group();
+    const bars = targetHeights.map((h, i) => {
+      const geo = new THREE.BoxGeometry(0.55, h, 0.55);
+      const mat = new THREE.MeshStandardMaterial({ color: colors[i], roughness: 0.4, metalness: 0.05 });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.x = (i - (targetHeights.length - 1) / 2) * 0.75;
+      mesh.scale.y = 0.001;
+      group.add(mesh);
+      return mesh;
+    });
+    group.position.y = -1;
+    scene.add(group);
+
+    const reduceMotion =
+      window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    let raf;
+    let startTime = null;
+    function animate(ts) {
+      if (startTime === null) startTime = ts;
+      const elapsed = ts - startTime;
+
+      bars.forEach((mesh, i) => {
+        const delay = i * 100;
+        const t = Math.min(Math.max((elapsed - delay) / 700, 0), 1);
+        const eased = 1 - Math.pow(1 - t, 3);
+        mesh.scale.y = Math.max(eased, 0.001);
+        mesh.position.y = (targetHeights[i] * mesh.scale.y) / 2;
+      });
+
+      if (!reduceMotion) {
+        group.rotation.y = elapsed * 0.00025;
+      }
+
+      renderer.render(scene, camera);
+      raf = requestAnimationFrame(animate);
+    }
+    raf = requestAnimationFrame(animate);
+
+    function handleResize() {
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      if (!w || !h) return;
+      renderer.setSize(w, h);
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+    }
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", handleResize);
+      bars.forEach((mesh) => {
+        mesh.geometry.dispose();
+        mesh.material.dispose();
+      });
+      renderer.dispose();
+      if (container.contains(renderer.domElement)) container.removeChild(renderer.domElement);
+    };
+  }, []);
+
+  return <div ref={containerRef} className="bpg-hero-3d" />;
+}
+
 export default function BusinessPlanGenerator() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [view, setView] = useState("welcome");
@@ -642,9 +760,7 @@ export default function BusinessPlanGenerator() {
           background: var(--surface); border-radius: 20px; padding: 18px 16px;
           display: flex; flex-direction: column; gap: 6px;
           box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 8px 20px rgba(0,0,0,0.04);
-          transition: transform 0.35s var(--spring), box-shadow 0.35s var(--spring);
         }
-        .bpg-stat-tile:hover { transform: translateY(-3px) scale(1.02); box-shadow: 0 14px 28px rgba(0,0,0,0.08); }
         .bpg-stat-dot { width: 8px; height: 8px; border-radius: 50%; }
         .bpg-stat-label { font-size: 12px; color: var(--gray); font-weight: 500; }
         .bpg-stat-value { font-family: ui-rounded, -apple-system, sans-serif; font-size: 19px; font-weight: 700; letter-spacing: -0.01em; }
@@ -673,10 +789,29 @@ export default function BusinessPlanGenerator() {
         .bpg-result-actions { display: flex; gap: 12px; margin-top: 12px; flex-wrap: wrap; }
 
         @keyframes bpg-enter {
-          from { opacity: 0; transform: translateY(18px) scale(0.98); }
-          to { opacity: 1; transform: translateY(0) scale(1); }
+          from { opacity: 0; transform: perspective(800px) translateY(18px) rotateX(8deg) scale(0.98); }
+          to { opacity: 1; transform: perspective(800px) translateY(0) rotateX(0deg) scale(1); }
         }
         .bpg-enter { animation: bpg-enter 0.6s var(--spring) both; }
+
+        .bpg-hero-3d { width: 100%; max-width: 300px; height: 180px; margin: 0 auto 4px; }
+        .bpg-hero-3d canvas { display: block; }
+
+        .bpg-tab-panel-wrap { perspective: 1400px; }
+        @keyframes bpg-flip-in {
+          from { opacity: 0; transform: rotateY(-90deg); }
+          to { opacity: 1; transform: rotateY(0deg); }
+        }
+        .bpg-tab-content { animation: bpg-flip-in 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both; transform-style: preserve-3d; }
+
+        .bpg-stat-tile { transition: transform 0.25s ease, box-shadow 0.35s var(--spring); }
+        .bpg-stat-tile:hover { box-shadow: 0 14px 28px rgba(0,0,0,0.1); }
+
+        @media (prefers-reduced-motion: reduce) {
+          .bpg-enter, .bpg-tab-content { animation: none !important; opacity: 1 !important; transform: none !important; }
+          .bpg-stat-tile { transition: none; }
+          .bpg-wave, .bpg-gradient-text, .bpg-blob { animation: none !important; }
+        }
 
         .bpg-welcome {
           position: relative; overflow: hidden; min-height: 76vh;
@@ -746,6 +881,7 @@ export default function BusinessPlanGenerator() {
           <div className="bpg-blob bpg-blob-1" />
           <div className="bpg-blob bpg-blob-2" />
           <div className="bpg-welcome-content">
+            <BarsHero />
             {!welcomeGreeted ? (
               <div className="bpg-enter">
                 <div className="bpg-eyebrow" style={{ justifyContent: "center" }}>Piano d'investimento</div>
@@ -932,7 +1068,9 @@ export default function BusinessPlanGenerator() {
               </button>
             </div>
 
-            {resultTab === "azienda" ? (
+            <div className="bpg-tab-panel-wrap">
+              <div key={resultTab} className="bpg-tab-content">
+              {resultTab === "azienda" ? (
               <>
                 <div className="bpg-stat-row">
                   <StatTile label="Budget di partenza" color={C_INK} delay={0}>
@@ -1024,7 +1162,9 @@ export default function BusinessPlanGenerator() {
                   <SegmentsPie segments={plan.market_study?.customer_segments} />
                 </Section>
               </>
-            )}
+              )}
+              </div>
+            </div>
 
             <div className="bpg-result-actions">
               <button className="bpg-btn bpg-btn-ghost" onClick={() => setView("form")}>Modifica input</button>
