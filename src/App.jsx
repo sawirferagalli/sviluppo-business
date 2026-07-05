@@ -346,7 +346,8 @@ function UseOfFundsPie({ useOfFunds, budget }) {
 
 export default function BusinessPlanGenerator() {
   const [form, setForm] = useState(EMPTY_FORM);
-  const [view, setView] = useState("form");
+  const [view, setView] = useState("welcome");
+  const [welcomeGreeted, setWelcomeGreeted] = useState(false);
   const [plan, setPlan] = useState(null);
   const [rawPlanText, setRawPlanText] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
@@ -569,22 +570,111 @@ export default function BusinessPlanGenerator() {
         }
         .bpg-enter { animation: bpg-enter 0.6s var(--spring) both; }
 
+        .bpg-welcome {
+          position: relative; overflow: hidden; min-height: 76vh;
+          display: flex; align-items: center; justify-content: center; text-align: center;
+        }
+        .bpg-blob { position: absolute; border-radius: 50%; filter: blur(60px); opacity: 0.32; z-index: 0; }
+        .bpg-blob-1 { width: 380px; height: 380px; background: var(--green); top: -90px; left: -110px; animation: bpg-float1 15s ease-in-out infinite; }
+        .bpg-blob-2 { width: 320px; height: 320px; background: var(--blue); bottom: -100px; right: -90px; animation: bpg-float2 17s ease-in-out infinite; }
+        @keyframes bpg-float1 { 0%, 100% { transform: translate(0,0) scale(1); } 50% { transform: translate(40px, 30px) scale(1.12); } }
+        @keyframes bpg-float2 { 0%, 100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-30px, -35px) scale(1.06); } }
+
+        .bpg-ambient { position: relative; }
+        .bpg-blob-sm-1 { width: 200px; height: 200px; background: var(--green); top: -50px; left: -50px; opacity: 0.16; filter: blur(50px); animation: bpg-float1 15s ease-in-out infinite; }
+        .bpg-blob-sm-2 { width: 180px; height: 180px; background: var(--blue); top: -30px; right: -50px; opacity: 0.14; filter: blur(50px); animation: bpg-float2 17s ease-in-out infinite; }
+
+        .bpg-welcome-content { position: relative; z-index: 1; max-width: 480px; padding: 20px; }
+        .bpg-welcome-question { font-size: 40px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; margin: 0 0 32px; }
+        .bpg-welcome-form { display: flex; flex-direction: column; align-items: center; gap: 22px; }
+        .bpg-welcome-input {
+          width: 100%; border: none; border-bottom: 2px solid var(--line); background: transparent;
+          font-family: inherit; font-size: 26px; font-weight: 600; text-align: center; color: var(--ink);
+          padding: 8px 4px 14px; transition: border-color 0.3s ease, transform 0.3s var(--spring);
+        }
+        .bpg-welcome-input:focus { outline: none; border-color: var(--green); transform: scale(1.02); }
+        .bpg-welcome-input::placeholder { color: #C7C7CC; }
+
+        .bpg-welcome-greeting { font-size: 40px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 14px; }
+        .bpg-gradient-text {
+          background: linear-gradient(90deg, var(--green), var(--blue), var(--green));
+          background-size: 200% auto; -webkit-background-clip: text; background-clip: text; color: transparent;
+          animation: bpg-gradient-sweep 3s linear infinite;
+        }
+        @keyframes bpg-gradient-sweep { to { background-position: 200% center; } }
+        .bpg-wave { display: inline-block; animation: bpg-wave-anim 1.8s ease-in-out infinite; transform-origin: 70% 70%; }
+        @keyframes bpg-wave-anim {
+          0%, 60%, 100% { transform: rotate(0deg); }
+          10% { transform: rotate(14deg); } 20% { transform: rotate(-8deg); }
+          30% { transform: rotate(14deg); } 40% { transform: rotate(-4deg); } 50% { transform: rotate(10deg); }
+        }
+
         @media (max-width: 560px) {
           .bpg-form-grid { grid-template-columns: 1fr; }
           .bpg-stat-row { grid-template-columns: 1fr; }
           .bpg-h1 { font-size: 28px; }
+          .bpg-welcome-question, .bpg-welcome-greeting { font-size: 30px; }
         }
       `}</style>
 
+      {view === "welcome" ? (
+        <div className="bpg-welcome">
+          <div className="bpg-blob bpg-blob-1" />
+          <div className="bpg-blob bpg-blob-2" />
+          <div className="bpg-welcome-content">
+            {!welcomeGreeted ? (
+              <div className="bpg-enter">
+                <div className="bpg-eyebrow" style={{ justifyContent: "center" }}>Piano d'investimento</div>
+                <h1 className="bpg-welcome-question">Come si chiama<br />la tua azienda?</h1>
+                <form
+                  className="bpg-welcome-form"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (form.name.trim()) setWelcomeGreeted(true);
+                  }}
+                >
+                  <input
+                    className="bpg-welcome-input"
+                    value={form.name}
+                    onChange={update("name")}
+                    placeholder="Nome dell'azienda"
+                    autoFocus
+                  />
+                  <button className="bpg-btn bpg-btn-primary" type="submit" disabled={!form.name.trim()}>
+                    Continua
+                  </button>
+                </form>
+              </div>
+            ) : (
+              <div className="bpg-enter">
+                <h1 className="bpg-welcome-greeting">
+                  Ciao, <span className="bpg-gradient-text">{form.name}</span>{" "}
+                  <span className="bpg-wave">👋</span>
+                </h1>
+                <p className="bpg-sub" style={{ margin: "0 auto 28px" }}>
+                  Pronto a costruire il piano d'investimento che convincerà i tuoi investitori?
+                </p>
+                <button className="bpg-btn bpg-btn-primary" onClick={() => setView("form")}>
+                  Inizia →
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
       <div className="bpg-shell">
         {view === "form" && (
           <>
-            <div className="bpg-eyebrow">Piano d'investimento</div>
-            <h1 className="bpg-h1">Genera il piano d'investimento per i tuoi investitori</h1>
-            <p className="bpg-sub">
-              Descrivi la tua startup e il budget che hai a disposizione. L'AI costruisce
-              mercato, allocazione del capitale, proiezioni e pitch — con grafici, non solo testo.
-            </p>
+            <div className="bpg-ambient">
+              <div className="bpg-blob bpg-blob-sm-1" />
+              <div className="bpg-blob bpg-blob-sm-2" />
+              <div className="bpg-eyebrow">Piano d'investimento</div>
+              <h1 className="bpg-h1">Genera il piano d'investimento per i tuoi investitori</h1>
+              <p className="bpg-sub">
+                Descrivi la tua startup e il budget che hai a disposizione. L'AI costruisce
+                mercato, allocazione del capitale, proiezioni e pitch — con grafici, non solo testo.
+              </p>
+            </div>
 
             <div className="bpg-card">
               <div className="bpg-form-grid">
@@ -644,7 +734,9 @@ export default function BusinessPlanGenerator() {
         )}
 
         {view === "loading" && (
-          <div className="bpg-loading">
+          <div className="bpg-loading bpg-ambient">
+            <div className="bpg-blob bpg-blob-sm-1" />
+            <div className="bpg-blob bpg-blob-sm-2" />
             <div className="bpg-spinner" />
             <div className="bpg-loading-text">Costruzione del piano d'investimento in corso…</div>
           </div>
@@ -682,8 +774,10 @@ export default function BusinessPlanGenerator() {
 
         {view === "result" && plan && (
           <>
-            <div className="bpg-memo-head bpg-enter">
-              <span className="bpg-memo-name">{form.name}</span>
+            <div className="bpg-memo-head bpg-enter bpg-ambient">
+              <div className="bpg-blob bpg-blob-sm-1" />
+              <div className="bpg-blob bpg-blob-sm-2" />
+              <span className="bpg-memo-name bpg-gradient-text">{form.name}</span>
               <span className="bpg-memo-meta">{new Date().toLocaleDateString("it-IT")}</span>
             </div>
 
@@ -750,6 +844,7 @@ export default function BusinessPlanGenerator() {
           </>
         )}
       </div>
+      )}
     </div>
   );
 }
