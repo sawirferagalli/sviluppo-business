@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from "react";
-import * as THREE from "three";
 import {
   ResponsiveContainer,
   BarChart,
@@ -463,99 +462,47 @@ function TrendsList({ trends }) {
   );
 }
 
-// L'elemento "wow": un piccolo grafico a barre reale in 3D, nei colori del
-// prodotto, che si costruisce da zero al primo caricamento e poi ruota
-// lentamente — la promessa del prodotto (trasformare un'idea in dati) resa
-// visibile prima ancora di leggere una parola.
-function BarsHero() {
-  const containerRef = useRef(null);
+// L'elemento "wow", in linea con il resto del sito: uno stack di schede in
+// vetro smerigliato — come i widget di iOS o le carte di Wallet — separate
+// in vera profondità 3D (via CSS, non render), che si inclinano seguendo
+// il mouse. Ogni scheda accenna a uno dei contenuti reali del piano.
+function GlassStack() {
+  const stackRef = useRef(null);
 
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
+  function handleMouseMove(e) {
+    const el = stackRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width - 0.5;
+    const y = (e.clientY - rect.top) / rect.height - 0.5;
+    el.style.transform = `rotateX(${(-y * 14).toFixed(2)}deg) rotateY(${(x * 14).toFixed(2)}deg)`;
+  }
 
-    const width = container.clientWidth || 280;
-    const height = container.clientHeight || 190;
+  function handleMouseLeave() {
+    const el = stackRef.current;
+    if (el) el.style.transform = "";
+  }
 
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(35, width / height, 0.1, 100);
-    camera.position.set(3.4, 2.5, 4.8);
-    camera.lookAt(0, 0.3, 0);
-
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    container.appendChild(renderer.domElement);
-
-    scene.add(new THREE.AmbientLight(0xffffff, 0.75));
-    const dir = new THREE.DirectionalLight(0xffffff, 0.9);
-    dir.position.set(3, 5, 4);
-    scene.add(dir);
-
-    const colors = [0x30b463, 0x0a84ff, 0xff9f0a, 0xbf5af2, 0xff375f];
-    const targetHeights = [1.1, 1.9, 1.35, 2.2, 1.6];
-    const group = new THREE.Group();
-    const bars = targetHeights.map((h, i) => {
-      const geo = new THREE.BoxGeometry(0.55, h, 0.55);
-      const mat = new THREE.MeshStandardMaterial({ color: colors[i], roughness: 0.4, metalness: 0.05 });
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.x = (i - (targetHeights.length - 1) / 2) * 0.75;
-      mesh.scale.y = 0.001;
-      group.add(mesh);
-      return mesh;
-    });
-    group.position.y = -1;
-    scene.add(group);
-
-    const reduceMotion =
-      window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-    let raf;
-    let startTime = null;
-    function animate(ts) {
-      if (startTime === null) startTime = ts;
-      const elapsed = ts - startTime;
-
-      bars.forEach((mesh, i) => {
-        const delay = i * 100;
-        const t = Math.min(Math.max((elapsed - delay) / 700, 0), 1);
-        const eased = 1 - Math.pow(1 - t, 3);
-        mesh.scale.y = Math.max(eased, 0.001);
-        mesh.position.y = (targetHeights[i] * mesh.scale.y) / 2;
-      });
-
-      if (!reduceMotion) {
-        group.rotation.y = elapsed * 0.00025;
-      }
-
-      renderer.render(scene, camera);
-      raf = requestAnimationFrame(animate);
-    }
-    raf = requestAnimationFrame(animate);
-
-    function handleResize() {
-      const w = container.clientWidth;
-      const h = container.clientHeight;
-      if (!w || !h) return;
-      renderer.setSize(w, h);
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-    }
-    window.addEventListener("resize", handleResize);
-
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener("resize", handleResize);
-      bars.forEach((mesh) => {
-        mesh.geometry.dispose();
-        mesh.material.dispose();
-      });
-      renderer.dispose();
-      if (container.contains(renderer.domElement)) container.removeChild(renderer.domElement);
-    };
-  }, []);
-
-  return <div ref={containerRef} className="bpg-hero-3d" />;
+  return (
+    <div className="bpg-glass-wrap" onMouseMove={handleMouseMove} onMouseLeave={handleMouseLeave}>
+      <div className="bpg-glass-stack" ref={stackRef}>
+        <div className="bpg-glass-card bpg-glass-card-1 bpg-enter" style={{ animationDelay: "0ms" }}>
+          <div className="bpg-mini-bars">
+            <span style={{ height: "35%", background: C_ORANGE }} />
+            <span style={{ height: "60%", background: C_GREEN }} />
+            <span style={{ height: "42%", background: C_BLUE }} />
+            <span style={{ height: "78%", background: C_PURPLE }} />
+          </div>
+        </div>
+        <div className="bpg-glass-card bpg-glass-card-2 bpg-enter" style={{ animationDelay: "90ms" }}>
+          <div className="bpg-mini-donut" />
+        </div>
+        <div className="bpg-glass-card bpg-glass-card-3 bpg-enter" style={{ animationDelay: "180ms" }}>
+          <span className="bpg-glass-euro">€</span>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function BusinessPlanGenerator() {
@@ -794,8 +741,38 @@ export default function BusinessPlanGenerator() {
         }
         .bpg-enter { animation: bpg-enter 0.6s var(--spring) both; }
 
-        .bpg-hero-3d { width: 100%; max-width: 300px; height: 180px; margin: 0 auto 4px; }
-        .bpg-hero-3d canvas { display: block; }
+        .bpg-glass-wrap {
+          perspective: 1000px; width: 100%; max-width: 280px; height: 160px;
+          margin: 0 auto 8px; display: flex; align-items: center; justify-content: center;
+        }
+        .bpg-glass-stack {
+          position: relative; width: 170px; height: 120px; transform-style: preserve-3d;
+          transition: transform 0.25s ease-out;
+        }
+        .bpg-glass-card {
+          position: absolute; width: 118px; height: 88px; border-radius: 20px;
+          background: rgba(255,255,255,0.55); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+          border: 1px solid rgba(255,255,255,0.7);
+          box-shadow: 0 14px 32px rgba(0,0,0,0.10);
+          display: flex; align-items: center; justify-content: center;
+        }
+        .bpg-glass-card-1 { transform: translate3d(-32px, -6px, 0px) rotate(-8deg); z-index: 1; }
+        .bpg-glass-card-2 { transform: translate3d(14px, 12px, 32px) rotate(4deg); z-index: 2; }
+        .bpg-glass-card-3 { transform: translate3d(38px, -22px, 64px) rotate(11deg); z-index: 3; }
+        .bpg-mini-bars { display: flex; align-items: flex-end; gap: 6px; height: 46px; }
+        .bpg-mini-bars span { width: 9px; border-radius: 4px; }
+        .bpg-mini-donut {
+          width: 46px; height: 46px; border-radius: 50%; position: relative;
+          background: conic-gradient(var(--green) 0% 30%, var(--blue) 30% 55%, #FF9F0A 55% 75%, #BF5AF2 75% 100%);
+        }
+        .bpg-mini-donut::after {
+          content: ""; position: absolute; inset: 12px; border-radius: 50%;
+          background: rgba(255,255,255,0.9);
+        }
+        .bpg-glass-euro {
+          font-size: 28px; font-weight: 700; color: var(--ink);
+          font-family: ui-rounded, -apple-system, sans-serif;
+        }
 
         .bpg-tab-panel-wrap { perspective: 1400px; }
         @keyframes bpg-flip-in {
@@ -881,7 +858,7 @@ export default function BusinessPlanGenerator() {
           <div className="bpg-blob bpg-blob-1" />
           <div className="bpg-blob bpg-blob-2" />
           <div className="bpg-welcome-content">
-            <BarsHero />
+            <GlassStack />
             {!welcomeGreeted ? (
               <div className="bpg-enter">
                 <div className="bpg-eyebrow" style={{ justifyContent: "center" }}>Piano d'investimento</div>
