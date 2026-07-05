@@ -13,6 +13,8 @@ import {
   Cell,
   LineChart,
   Line,
+  AreaChart,
+  Area,
   ReferenceLine,
 } from "recharts";
 
@@ -60,11 +62,13 @@ const EMPTY_FORM = {
   name: "",
   idea: "",
   sector: SECTOR_OPTIONS[0],
+  sectorOther: "",
   market: "",
   businessModel: MODEL_OPTIONS[0],
   stage: STAGE_OPTIONS[0],
   fundingAsk: "",
   edge: "",
+  knownCompetitors: "",
 };
 
 function parseEuroAmount(str) {
@@ -92,10 +96,12 @@ function formatEUR(num) {
 }
 
 function buildPrompt(form, parsedBudget) {
+  const effectiveSector =
+    form.sector === "Altro" && form.sectorOther.trim() ? form.sectorOther.trim() : form.sector;
   return [
     `Startup: ${form.name || "Senza nome"}`,
     `Idea di business: ${form.idea}`,
-    `Settore: ${form.sector}`,
+    `Settore specifico: ${effectiveSector}`,
     `Mercato geografico target: ${form.market || "non specificato"}`,
     `Modello di business: ${form.businessModel}`,
     `Fase attuale: ${form.stage}`,
@@ -103,9 +109,11 @@ function buildPrompt(form, parsedBudget) {
       parsedBudget ? `${parsedBudget} euro` : form.fundingAsk || "non specificato, stimalo tu"
     }`,
     form.edge ? `Vantaggio competitivo dichiarato: ${form.edge}` : null,
+    form.knownCompetitors ? `Competitor già noti al fondatore: ${form.knownCompetitors}` : null,
     "",
     "Scrivi un piano di investimento per questa startup seed-stage, pensato per convincere investitori.",
     "Ancora tutte le proiezioni finanziarie e l'allocazione del capitale al budget indicato sopra: i costi, i ricavi e le percentuali di allocazione devono essere coerenti con quella cifra, non generici.",
+    "Ancora lo studio di mercato al settore specifico indicato, non a categorie generiche.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -124,13 +132,21 @@ Usa esattamente questo schema, con questi tipi di dato:
     "breakeven_month": numero (mese 1-36),
     "use_of_funds": [{"category":"stringa breve","percent":numero}, ... tra 3 e 5 categorie, i percent devono sommare esattamente a 100]
   },
-  "pitch": {"problem":"stringa breve","solution":"stringa breve","why_now":"stringa breve","ask_eur": numero}
+  "pitch": {"problem":"stringa breve","solution":"stringa breve","why_now":"stringa breve","ask_eur": numero},
+  "market_study": {
+    "growth_rate_percent": numero (crescita annua stimata del settore specifico, es. 12),
+    "growth_trend": [{"year":numero,"market_size_eur":numero}, ... esattamente 5 punti: 3 storici, l'anno corrente, 1 proiezione futura],
+    "key_trends": ["tendenza breve 1", "tendenza breve 2", "tendenza breve 3"],
+    "competitive_landscape": [{"name":"nome player o categoria","market_share_percent":numero}, ... tra 3 e 5 voci incluso eventualmente 'Altri', percent sommano a 100],
+    "customer_segments": [{"segment":"nome segmento cliente","percent":numero}, ... tra 3 e 4 voci, percent sommano a 100]
+  }
 }
 Regole importanti:
-- Tutti i valori monetari (tam_eur, sam_eur, som_eur, revenue_eur, costs_eur, ask_eur) sono NUMERI interi in euro, senza simboli, punti, virgole o testo.
+- Tutti i valori monetari (tam_eur, sam_eur, som_eur, revenue_eur, costs_eur, ask_eur, market_size_eur) sono NUMERI interi in euro, senza simboli, punti, virgole o testo.
 - ask_eur deve corrispondere al budget indicato dall'utente, se fornito.
 - I costi annui devono essere coerenti con un budget di quella entità (non sparare numeri arbitrari).
-- use_of_funds: i "percent" devono sommare esattamente a 100.
+- use_of_funds: i "percent" devono sommare esattamente a 100. Stesso vale per competitive_landscape e customer_segments.
+- market_study deve riferirsi al settore specifico indicato dall'utente, non a una categoria generica.
 - Ogni campo di testo è una singola riga, senza interruzioni di riga reali, massimo 2-3 frasi.
 - SOM <= SAM <= TAM.`;
 
@@ -344,11 +360,92 @@ function UseOfFundsPie({ useOfFunds, budget }) {
   );
 }
 
+function GrowthTrendChart({ data }) {
+  const points = (data || []).map((d) => ({ year: String(d.year), value: d.market_size_eur || 0 }));
+  return (
+    <ResponsiveContainer width="100%" height={200}>
+      <AreaChart data={points} margin={{ top: 8, right: 16, left: 0, bottom: 4 }}>
+        <defs>
+          <linearGradient id="bpgGrowthGradient" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={C_BLUE} stopOpacity={0.35} />
+            <stop offset="100%" stopColor={C_BLUE} stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid stroke={C_LINE} vertical={false} />
+        <XAxis dataKey="year" tick={{ fontSize: 12, fill: C_INK }} axisLine={false} tickLine={false} />
+        <YAxis tickFormatter={(v) => formatEUR(v)} tick={{ fontSize: 11, fill: C_GRAY }} width={70} axisLine={false} tickLine={false} />
+        <Tooltip content={<ChartTooltipEUR />} />
+        <Area
+          type="monotone"
+          dataKey="value"
+          name="Dimensione mercato"
+          stroke={C_BLUE}
+          strokeWidth={3}
+          fill="url(#bpgGrowthGradient)"
+          dot={{ r: 4, fill: C_BLUE, strokeWidth: 0 }}
+          animationDuration={900}
+          animationEasing="ease-out"
+        />
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+}
+
+function CompetitiveLandscapeChart({ data }) {
+  const items = (data || []).map((d) => ({ name: d.name, value: d.market_share_percent || 0 }));
+  return (
+    <ResponsiveContainer width="100%" height={Math.max(160, items.length * 44)}>
+      <BarChart data={items} layout="vertical" margin={{ top: 4, right: 28, left: 0, bottom: 4 }}>
+        <CartesianGrid stroke={C_LINE} horizontal={false} />
+        <XAxis type="number" tickFormatter={(v) => `${v}%`} tick={{ fontSize: 11, fill: C_GRAY }} axisLine={false} tickLine={false} />
+        <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 12.5, fill: C_INK, fontWeight: 600 }} axisLine={false} tickLine={false} />
+        <Tooltip formatter={(value) => [`${value}%`, "Quota di mercato"]} />
+        <Bar dataKey="value" radius={[8, 8, 8, 8]} animationDuration={900} animationEasing="ease-out">
+          {items.map((_, i) => (
+            <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+          ))}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+function SegmentsPie({ segments }) {
+  const items = (segments || []).map((s) => ({ name: s.segment, value: s.percent }));
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <PieChart>
+        <Pie data={items} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={52} outerRadius={82} paddingAngle={3} animationDuration={900} animationEasing="ease-out">
+          {items.map((_, i) => (
+            <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} stroke="none" />
+          ))}
+        </Pie>
+        <Tooltip formatter={(value, name) => [`${value}%`, name]} />
+        <Legend wrapperStyle={{ fontSize: 12 }} iconType="circle" />
+      </PieChart>
+    </ResponsiveContainer>
+  );
+}
+
+function TrendsList({ trends }) {
+  return (
+    <div className="bpg-trends-row">
+      {(trends || []).map((t, i) => (
+        <div key={i} className="bpg-trend-card">
+          <span className="bpg-trend-dot" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
+          <span>{t}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function BusinessPlanGenerator() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [view, setView] = useState("welcome");
   const [welcomeGreeted, setWelcomeGreeted] = useState(false);
   const [plan, setPlan] = useState(null);
+  const [resultTab, setResultTab] = useState("azienda");
   const [rawPlanText, setRawPlanText] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
   const [copyLabel, setCopyLabel] = useState("Copia come testo");
@@ -362,6 +459,7 @@ export default function BusinessPlanGenerator() {
 
   async function generate() {
     setView("loading");
+    setResultTab("azienda");
     setErrorMsg("");
     try {
       const response = await fetch("/api/generate", {
@@ -369,7 +467,7 @@ export default function BusinessPlanGenerator() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-4-6",
-          max_tokens: 1000,
+          max_tokens: 2000,
           system: SYSTEM_PROMPT,
           messages: [{ role: "user", content: buildPrompt(form, parsedBudget) }],
         }),
@@ -427,6 +525,16 @@ export default function BusinessPlanGenerator() {
       `Soluzione: ${plan.pitch?.solution}`,
       `Perché ora: ${plan.pitch?.why_now}`,
       `Richiesta: ${formatEUR(plan.pitch?.ask_eur)}`,
+      "",
+      "STUDIO DI MERCATO",
+      `Crescita annua stimata: ${plan.market_study?.growth_rate_percent}%`,
+      ...(plan.market_study?.growth_trend || []).map((g) => `${g.year}: ${formatEUR(g.market_size_eur)}`),
+      "Tendenze principali:",
+      ...(plan.market_study?.key_trends || []).map((t) => `- ${t}`),
+      "Panorama competitivo:",
+      ...(plan.market_study?.competitive_landscape || []).map((c) => `- ${c.name}: ${c.market_share_percent}%`),
+      "Segmenti di clientela:",
+      ...(plan.market_study?.customer_segments || []).map((s) => `- ${s.segment}: ${s.percent}%`),
     ].join("\n");
   }
 
@@ -609,6 +717,22 @@ export default function BusinessPlanGenerator() {
           30% { transform: rotate(14deg); } 40% { transform: rotate(-4deg); } 50% { transform: rotate(10deg); }
         }
 
+        .bpg-tabs {
+          display: inline-flex; background: var(--canvas); border-radius: 980px; padding: 4px;
+          margin-bottom: 28px; gap: 2px;
+        }
+        .bpg-tab {
+          border: none; background: transparent; padding: 10px 20px; border-radius: 980px;
+          font-family: inherit; font-size: 14px; font-weight: 600; color: var(--gray); cursor: pointer;
+          transition: background 0.35s var(--spring), color 0.25s ease, box-shadow 0.35s var(--spring);
+        }
+        .bpg-tab-active { background: var(--surface); color: var(--ink); box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        .bpg-tab:hover:not(.bpg-tab-active) { color: var(--ink); }
+
+        .bpg-trends-row { display: flex; flex-direction: column; gap: 12px; }
+        .bpg-trend-card { display: flex; align-items: flex-start; gap: 10px; font-size: 14.5px; line-height: 1.5; color: var(--ink); }
+        .bpg-trend-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
+
         @media (max-width: 560px) {
           .bpg-form-grid { grid-template-columns: 1fr; }
           .bpg-stat-row { grid-template-columns: 1fr; }
@@ -698,6 +822,12 @@ export default function BusinessPlanGenerator() {
                   </select>
                 </Field>
 
+                {form.sector === "Altro" && (
+                  <Field label="Specifica il settore">
+                    <input className="bpg-input" value={form.sectorOther} onChange={update("sectorOther")} placeholder="Es. Edtech per la formazione professionale" />
+                  </Field>
+                )}
+
                 <Field label="Mercato geografico target">
                   <input className="bpg-input" value={form.market} onChange={update("market")} placeholder="Es. Italia, poi Europa" />
                 </Field>
@@ -717,6 +847,12 @@ export default function BusinessPlanGenerator() {
                 <div className="bpg-field bpg-field-full">
                   <Field label="Vantaggio competitivo (opzionale)">
                     <textarea className="bpg-textarea" value={form.edge} onChange={update("edge")} placeholder="Cosa vi rende difficili da copiare" />
+                  </Field>
+                </div>
+
+                <div className="bpg-field bpg-field-full">
+                  <Field label="Competitor che conosci già (opzionale)" hint="Aiuta a rendere più preciso il panorama competitivo nello studio di mercato.">
+                    <input className="bpg-input" value={form.knownCompetitors} onChange={update("knownCompetitors")} placeholder="Es. Nome A, Nome B" />
                   </Field>
                 </div>
               </div>
@@ -781,60 +917,114 @@ export default function BusinessPlanGenerator() {
               <span className="bpg-memo-meta">{new Date().toLocaleDateString("it-IT")}</span>
             </div>
 
-            <div className="bpg-stat-row">
-              <StatTile label="Budget di partenza" color={C_INK} delay={0}>
-                <AnimatedNumber value={budgetForCharts || 0} format={(v) => formatEUR(v)} />
-              </StatTile>
-              <StatTile label="Break-even stimato" color={C_BLUE} delay={80}>
-                {plan.financials?.breakeven_month ? (
-                  <><AnimatedNumber value={plan.financials.breakeven_month} format={(v) => Math.round(v)} /> mesi</>
-                ) : "—"}
-              </StatTile>
-              <StatTile label="Liquidità esaurita" color={runwayOk ? C_GREEN : C_ORANGE} delay={160}>
-                {runwayLabel}
-              </StatTile>
+            <div className="bpg-tabs bpg-enter">
+              <button
+                className={`bpg-tab ${resultTab === "azienda" ? "bpg-tab-active" : ""}`}
+                onClick={() => setResultTab("azienda")}
+              >
+                Azienda
+              </button>
+              <button
+                className={`bpg-tab ${resultTab === "mercato" ? "bpg-tab-active" : ""}`}
+                onClick={() => setResultTab("mercato")}
+              >
+                Studio di mercato
+              </button>
             </div>
 
-            <Section icon={ICONS.flag} color={C_PINK} title="Executive summary" delay={80}>
-              <p className="bpg-summary-quote">{plan.executive_summary}</p>
-            </Section>
+            {resultTab === "azienda" ? (
+              <>
+                <div className="bpg-stat-row">
+                  <StatTile label="Budget di partenza" color={C_INK} delay={0}>
+                    <AnimatedNumber value={budgetForCharts || 0} format={(v) => formatEUR(v)} />
+                  </StatTile>
+                  <StatTile label="Break-even stimato" color={C_BLUE} delay={80}>
+                    {plan.financials?.breakeven_month ? (
+                      <><AnimatedNumber value={plan.financials.breakeven_month} format={(v) => Math.round(v)} /> mesi</>
+                    ) : "—"}
+                  </StatTile>
+                  <StatTile label="Liquidità esaurita" color={runwayOk ? C_GREEN : C_ORANGE} delay={160}>
+                    {runwayLabel}
+                  </StatTile>
+                </div>
 
-            <Section
-              icon={ICONS.market}
-              color={C_BLUE}
-              title="Analisi di mercato"
-              caption={`Target: ${plan.market?.target || "—"} · Competitor: ${plan.market?.competitors || "—"}`}
-              delay={140}
-            >
-              <MarketFunnelChart tam={plan.market?.tam_eur} sam={plan.market?.sam_eur} som={plan.market?.som_eur} />
-            </Section>
+                <Section icon={ICONS.flag} color={C_PINK} title="Executive summary" delay={80}>
+                  <p className="bpg-summary-quote">{plan.executive_summary}</p>
+                </Section>
 
-            <Section
-              icon={ICONS.funds}
-              color={C_PURPLE}
-              title="Allocazione del capitale"
-              caption={`Ricavi: ${plan.business_model?.revenue_streams || "—"} · Pricing: ${plan.business_model?.pricing || "—"}`}
-              delay={200}
-            >
-              <UseOfFundsPie useOfFunds={plan.financials?.use_of_funds} budget={budgetForCharts} />
-            </Section>
+                <Section
+                  icon={ICONS.market}
+                  color={C_BLUE}
+                  title="Analisi di mercato"
+                  caption={`Target: ${plan.market?.target || "—"} · Competitor: ${plan.market?.competitors || "—"}`}
+                  delay={140}
+                >
+                  <MarketFunnelChart tam={plan.market?.tam_eur} sam={plan.market?.sam_eur} som={plan.market?.som_eur} />
+                </Section>
 
-            <Section icon={ICONS.growth} color={C_GREEN} title="Ricavi vs costi" delay={260}>
-              <FinancialsChart projections={plan.financials?.projections} />
-            </Section>
+                <Section
+                  icon={ICONS.funds}
+                  color={C_PURPLE}
+                  title="Allocazione del capitale"
+                  caption={`Ricavi: ${plan.business_model?.revenue_streams || "—"} · Pricing: ${plan.business_model?.pricing || "—"}`}
+                  delay={200}
+                >
+                  <UseOfFundsPie useOfFunds={plan.financials?.use_of_funds} budget={budgetForCharts} />
+                </Section>
 
-            <Section icon={ICONS.wave} color={C_ORANGE} title="Liquidità disponibile nel tempo" caption={plan.financials?.assumptions} delay={320}>
-              <CashBalanceChart budget={budgetForCharts} projections={plan.financials?.projections} />
-            </Section>
+                <Section icon={ICONS.growth} color={C_GREEN} title="Ricavi vs costi" delay={260}>
+                  <FinancialsChart projections={plan.financials?.projections} />
+                </Section>
 
-            <Section icon={ICONS.flag} color={C_PINK} title="Pitch per investitori" delay={380}>
-              <div className="bpg-mini-row">
-                <div><strong>Problema —</strong> {plan.pitch?.problem}</div>
-                <div><strong>Soluzione —</strong> {plan.pitch?.solution}</div>
-                <div><strong>Perché ora —</strong> {plan.pitch?.why_now}</div>
-              </div>
-              <div className="bpg-ask-box">Richiesta: {formatEUR(plan.pitch?.ask_eur || budgetForCharts)}</div>
-            </Section>
+                <Section icon={ICONS.wave} color={C_ORANGE} title="Liquidità disponibile nel tempo" caption={plan.financials?.assumptions} delay={320}>
+                  <CashBalanceChart budget={budgetForCharts} projections={plan.financials?.projections} />
+                </Section>
+
+                <Section icon={ICONS.flag} color={C_PINK} title="Pitch per investitori" delay={380}>
+                  <div className="bpg-mini-row">
+                    <div><strong>Problema —</strong> {plan.pitch?.problem}</div>
+                    <div><strong>Soluzione —</strong> {plan.pitch?.solution}</div>
+                    <div><strong>Perché ora —</strong> {plan.pitch?.why_now}</div>
+                  </div>
+                  <div className="bpg-ask-box">Richiesta: {formatEUR(plan.pitch?.ask_eur || budgetForCharts)}</div>
+                </Section>
+              </>
+            ) : (
+              <>
+                <div className="bpg-stat-row">
+                  <StatTile label="Dimensione mercato oggi" color={C_BLUE} delay={0}>
+                    <AnimatedNumber
+                      value={plan.market_study?.growth_trend?.[plan.market_study.growth_trend.length - 1]?.market_size_eur || 0}
+                      format={(v) => formatEUR(v)}
+                    />
+                  </StatTile>
+                  <StatTile label="Crescita annua stimata" color={C_GREEN} delay={80}>
+                    {plan.market_study?.growth_rate_percent != null ? (
+                      <><AnimatedNumber value={plan.market_study.growth_rate_percent} format={(v) => Math.round(v)} />%</>
+                    ) : "—"}
+                  </StatTile>
+                  <StatTile label="Player principale" color={C_ORANGE} delay={160}>
+                    {plan.market_study?.competitive_landscape?.[0]?.name || "—"}
+                  </StatTile>
+                </div>
+
+                <Section icon={ICONS.growth} color={C_BLUE} title="Andamento del settore" delay={80}>
+                  <GrowthTrendChart data={plan.market_study?.growth_trend} />
+                </Section>
+
+                <Section icon={ICONS.wave} color={C_PURPLE} title="Tendenze principali" delay={140}>
+                  <TrendsList trends={plan.market_study?.key_trends} />
+                </Section>
+
+                <Section icon={ICONS.market} color={C_ORANGE} title="Panorama competitivo" delay={200}>
+                  <CompetitiveLandscapeChart data={plan.market_study?.competitive_landscape} />
+                </Section>
+
+                <Section icon={ICONS.funds} color={C_PINK} title="Segmenti di clientela" delay={260}>
+                  <SegmentsPie segments={plan.market_study?.customer_segments} />
+                </Section>
+              </>
+            )}
 
             <div className="bpg-result-actions">
               <button className="bpg-btn bpg-btn-ghost" onClick={() => setView("form")}>Modifica input</button>
