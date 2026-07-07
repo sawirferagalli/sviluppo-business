@@ -17,6 +17,8 @@ import {
   Area,
   ReferenceLine,
 } from "recharts";
+import { BallPit } from "./components/AmbientBlob";
+import { CurrencyInput } from "./components/CurrencyInput";
 
 // Apple-inspired system palette: one neutral canvas, category colors used
 // the way iOS Health badges each metric — kept off everything except icons,
@@ -44,19 +46,22 @@ const SECTOR_OPTIONS = [
 ];
 
 const MODEL_OPTIONS = [
-  "Abbonamento (SaaS)",
-  "Commissioni (Marketplace)",
-  "Vendita diretta (E-commerce)",
-  "Licensing / B2B",
+  "SaaS/software",
+  "E-commerce",
+  "Marketplace",
+  "Servizi",
+  "Prodotto fisico/hardware",
   "Altro",
 ];
 
 const STAGE_OPTIONS = [
-  "Idea / Pre-seed",
-  "MVP costruito",
-  "Early revenue",
-  "Scaling",
+  "Solo idea",
+  "Primi test/MVP",
+  "Prime vendite",
+  "Ricavi stabili",
 ];
+
+const TIME_HORIZON_OPTIONS = ["6 mesi", "12 mesi", "24 mesi"];
 
 const EMPTY_FORM = {
   name: "",
@@ -66,21 +71,14 @@ const EMPTY_FORM = {
   market: "",
   businessModel: MODEL_OPTIONS[0],
   stage: STAGE_OPTIONS[0],
-  fundingAsk: "",
+  fundingAsk: 0,
+  monthlyRevenue: 0,
+  useOfCapital: "",
+  timeHorizon: TIME_HORIZON_OPTIONS[0],
+  team: "",
   edge: "",
   knownCompetitors: "",
 };
-
-function parseEuroAmount(str) {
-  if (!str) return null;
-  const lower = String(str).toLowerCase();
-  let multiplier = 1;
-  if (/mln|milioni/.test(lower)) multiplier = 1_000_000;
-  else if (/k\b/.test(lower)) multiplier = 1_000;
-  const digits = lower.replace(/[^\d]/g, "");
-  if (!digits) return null;
-  return Math.round(parseInt(digits, 10) * multiplier);
-}
 
 function formatEUR(num) {
   if (num === null || num === undefined || Number.isNaN(num)) return "—";
@@ -95,21 +93,31 @@ function formatEUR(num) {
   }
 }
 
-function buildPrompt(form, parsedBudget) {
+function buildPrompt(form) {
   const effectiveSector =
     form.sector === "Altro" && form.sectorOther.trim() ? form.sectorOther.trim() : form.sector;
+  const budget = form.fundingAsk;
+  const monthlyRevenue = form.monthlyRevenue;
   return [
     `Startup: ${form.name || "Senza nome"}`,
     `Idea di business: ${form.idea}`,
     `Settore specifico: ${effectiveSector}`,
     `Mercato geografico target: ${form.market || "non specificato"}`,
     `Modello di business: ${form.businessModel}`,
-    `Fase attuale: ${form.stage}`,
+    `Fase dell'azienda: ${form.stage}`,
     `Budget/capitale disponibile: ${
-      parsedBudget ? `${parsedBudget} euro` : form.fundingAsk || "non specificato, stimalo tu"
+      budget ? `${budget.toLocaleString("it-IT")} euro (valore esatto: ${budget})` : "non specificato, stimalo tu"
     }`,
-    form.edge ? `Vantaggio competitivo dichiarato: ${form.edge}` : null,
-    form.knownCompetitors ? `Competitor già noti al fondatore: ${form.knownCompetitors}` : null,
+    `Ricavi mensili attuali: ${
+      monthlyRevenue
+        ? `${monthlyRevenue.toLocaleString("it-IT")} euro/mese (valore esatto: ${monthlyRevenue})`
+        : "0 euro/mese (azienda pre-revenue, nessun ricavo ancora)"
+    }`,
+    `Uso previsto del capitale: ${form.useOfCapital.trim() || "dato non fornito"}`,
+    `Orizzonte temporale dell'obiettivo (break-even o fatturato target): ${form.timeHorizon}`,
+    `Team: ${form.team.trim() || "dato non fornito"}`,
+    `Vantaggio competitivo dichiarato: ${form.edge.trim() || "dato non fornito"}`,
+    `Competitor già noti al fondatore: ${form.knownCompetitors.trim() || "nessuno indicato"}`,
     "",
     "Scrivi un piano di investimento per questa startup seed-stage, pensato per convincere investitori.",
     "Ancora tutte le proiezioni finanziarie e l'allocazione del capitale al budget indicato sopra: i costi, i ricavi e le percentuali di allocazione devono essere coerenti con quella cifra, non generici.",
@@ -516,10 +524,13 @@ export default function BusinessPlanGenerator() {
   const [copyLabel, setCopyLabel] = useState("Copia come testo");
 
   const canSubmit = form.name.trim().length > 0 && form.idea.trim().length > 10;
-  const parsedBudget = parseEuroAmount(form.fundingAsk);
 
   function update(key) {
     return (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+  }
+
+  function updateNumber(key) {
+    return (value) => setForm((f) => ({ ...f, [key]: value }));
   }
 
   async function generate() {
@@ -527,18 +538,29 @@ export default function BusinessPlanGenerator() {
     setResultTab("azienda");
     setErrorMsg("");
     try {
+      const requestBody = {
+        model: "claude-sonnet-4-6",
+        max_tokens: 2000,
+        system: SYSTEM_PROMPT,
+        messages: [{ role: "user", content: buildPrompt(form) }],
+      };
+      console.log("[DIAGNOSTICA] body inviato a /api/generate:", requestBody);
       const response = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-6",
-          max_tokens: 2000,
-          system: SYSTEM_PROMPT,
-          messages: [{ role: "user", content: buildPrompt(form, parsedBudget) }],
-        }),
+        body: JSON.stringify(requestBody),
       });
 
-      if (!response.ok) throw new Error(`Richiesta fallita (status ${response.status})`);
+      if (!response.ok) {
+        let message = `Richiesta fallita (status ${response.status})`;
+        try {
+          const errData = await response.json();
+          if (errData?.error) message = errData.error;
+        } catch (_) {
+          // corpo non JSON, mantieni il messaggio generico
+        }
+        throw new Error(message);
+      }
 
       const data = await response.json();
       const textBlock = (data.content || []).find((b) => b.type === "text");
@@ -560,7 +582,7 @@ export default function BusinessPlanGenerator() {
 
   function planAsText() {
     if (!plan) return "";
-    const budget = parsedBudget || plan.pitch?.ask_eur;
+    const budget = form.fundingAsk || plan.pitch?.ask_eur;
     return [
       `PIANO DI INVESTIMENTO — ${form.name}`,
       "",
@@ -614,7 +636,7 @@ export default function BusinessPlanGenerator() {
     setTimeout(() => setCopyLabel("Copia come testo"), 2000);
   }
 
-  const budgetForCharts = plan ? parsedBudget || plan.pitch?.ask_eur : parsedBudget;
+  const budgetForCharts = plan ? form.fundingAsk || plan.pitch?.ask_eur : form.fundingAsk;
   const runwayLabel = plan ? computeRunwayLabel(budgetForCharts, plan.financials?.projections) : "";
   const runwayOk = runwayLabel === "Sostenibile nei 3 anni";
 
@@ -804,7 +826,13 @@ export default function BusinessPlanGenerator() {
         .bpg-blob-sm-1 { width: 200px; height: 200px; background: var(--green); top: -50px; left: -50px; opacity: 0.16; filter: blur(50px); animation: bpg-float1 15s ease-in-out infinite; }
         .bpg-blob-sm-2 { width: 180px; height: 180px; background: var(--blue); top: -30px; right: -50px; opacity: 0.14; filter: blur(50px); animation: bpg-float2 17s ease-in-out infinite; }
 
-        .bpg-welcome-content { position: relative; z-index: 1; max-width: 480px; padding: 20px; }
+        .bpg-welcome-balls { position: absolute; inset: 0; z-index: 0; }
+        .bpg-welcome-veil {
+          position: absolute; inset: 0; z-index: 1; pointer-events: none;
+          -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px);
+          background: rgba(245, 245, 247, 0.45);
+        }
+        .bpg-welcome-content { position: relative; z-index: 2; max-width: 480px; padding: 20px; }
         .bpg-welcome-question { font-size: 40px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; margin: 0 0 32px; }
         .bpg-welcome-form { display: flex; flex-direction: column; align-items: center; gap: 22px; }
         .bpg-welcome-input {
@@ -857,6 +885,10 @@ export default function BusinessPlanGenerator() {
         <div className="bpg-welcome">
           <div className="bpg-blob bpg-blob-1" />
           <div className="bpg-blob bpg-blob-2" />
+          <div className="bpg-welcome-balls">
+            <BallPit count={45} />
+          </div>
+          <div className="bpg-welcome-veil" />
           <div className="bpg-welcome-content">
             <GlassStack />
             {!welcomeGreeted ? (
@@ -919,8 +951,28 @@ export default function BusinessPlanGenerator() {
                   <input className="bpg-input" value={form.name} onChange={update("name")} placeholder="Es. Nimbus" />
                 </Field>
 
-                <Field label="Capitale che vuoi raccogliere" hint="Guida direttamente i grafici di allocazione e liquidità.">
-                  <input className="bpg-input" value={form.fundingAsk} onChange={update("fundingAsk")} placeholder="Es. 250.000 € oppure 250k" />
+                <div className="bpg-field">
+                  <CurrencyInput
+                    label="Capitale che vuoi raccogliere"
+                    value={form.fundingAsk}
+                    onChange={updateNumber("fundingAsk")}
+                    placeholder="Es. 250.000"
+                  />
+                  <span className="bpg-field-hint">Guida direttamente i grafici di allocazione e liquidità.</span>
+                </div>
+
+                <div className="bpg-field">
+                  <CurrencyInput
+                    label="Ricavi mensili attuali (opzionale)"
+                    value={form.monthlyRevenue}
+                    onChange={updateNumber("monthlyRevenue")}
+                    placeholder="Es. 5.000 (0 se non ci sono ancora)"
+                  />
+                  <span className="bpg-field-hint">Lascia 0 se non avete ancora ricavi.</span>
+                </div>
+
+                <Field label="Uso previsto del capitale (opzionale)" hint="Su cosa verrà speso principalmente.">
+                  <input className="bpg-input" value={form.useOfCapital} onChange={update("useOfCapital")} placeholder="Es. 50% prodotto, 30% marketing, 20% team" />
                 </Field>
 
                 <div className="bpg-field bpg-field-full">
@@ -951,21 +1003,31 @@ export default function BusinessPlanGenerator() {
                   </select>
                 </Field>
 
-                <Field label="Fase attuale">
+                <Field label="Fase dell'azienda">
                   <select className="bpg-select" value={form.stage} onChange={update("stage")}>
                     {STAGE_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </Field>
 
-                <div className="bpg-field bpg-field-full">
-                  <Field label="Vantaggio competitivo (opzionale)">
-                    <textarea className="bpg-textarea" value={form.edge} onChange={update("edge")} placeholder="Cosa vi rende difficili da copiare" />
-                  </Field>
-                </div>
+                <Field label="Orizzonte temporale" hint="Entro quanto tempo puntate al pareggio (break-even) o a un obiettivo di fatturato?">
+                  <select className="bpg-select" value={form.timeHorizon} onChange={update("timeHorizon")}>
+                    {TIME_HORIZON_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </Field>
+
+                <Field label="Team (opzionale)" hint="Quante persone, con che ruoli/esperienza?">
+                  <input className="bpg-input" value={form.team} onChange={update("team")} placeholder="Es. 2 co-founder: tech + growth" />
+                </Field>
 
                 <div className="bpg-field bpg-field-full">
                   <Field label="Competitor che conosci già (opzionale)" hint="Aiuta a rendere più preciso il panorama competitivo nello studio di mercato.">
                     <input className="bpg-input" value={form.knownCompetitors} onChange={update("knownCompetitors")} placeholder="Es. Nome A, Nome B" />
+                  </Field>
+                </div>
+
+                <div className="bpg-field bpg-field-full">
+                  <Field label="Vantaggio competitivo (opzionale)" hint="Cosa vi differenzia dai competitor che avete già indicato?">
+                    <textarea className="bpg-textarea" value={form.edge} onChange={update("edge")} placeholder="Cosa vi rende difficili da copiare" />
                   </Field>
                 </div>
               </div>
